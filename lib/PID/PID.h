@@ -1,6 +1,6 @@
 #ifndef PID_H
 #define PID_H
-#endif
+
 #include <functional>
 
 template <class T>
@@ -81,3 +81,5 @@ private:
   std::function<void(T output)> _pidOutput;
   unsigned long (*_getSystemTime)();
 };
+
+#endif

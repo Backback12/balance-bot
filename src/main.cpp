@@ -10,6 +10,7 @@ https://github.com/FluxGarage/RoboEyes/blob/main/examples/i2c_SSD1306_AnimationS
 // #include "motors_test.h"
 // #include "testing.h"
 #include "movement.h"
+#include "controls.h"
 #include "PID.h"
 
 TaskHandle_t Core0Task;
@@ -18,36 +19,11 @@ void Core0Loop(void *pvParameters);
 void Core1Loop(void *pvParameters);
 
 
-
-/*
-/// TESTING PID LOOP LIBRARY
-int pidSource() {
-  long val = motors::read_encoder(1);
-  Serial.print("READ:\t");
-  Serial.print(val);
-  Serial.print("\t");
-  return val;
-}
-void pidOutput(float output) {
-  int int_val_full = static_cast<int>(output);  // -128-0, 0-128
-  // remove dead space, start driving around 120
-  int after_dead_space = int_val_full + ((int_val_full > 0) ? 120 : -120);
-
-  motors::setMotorPwmRaw(1, after_dead_space);
-  Serial.print("OUTPUT:\t");
-  Serial.println(int_val_full);
-}
+//------------------- ROLL -------------------
+// make servos differential to affect roll
 //
-const float P = 0.5f;
-const float I = 0.01f;
-const float D = 0.01f;
-PIDController<float> myPIDController(P, I, D, pidSource, pidOutput);
-*/
-
-
-// --- Constants & Variables ---
 float target_roll = 0.0;  // change when "skating"?
-uint8_t current_leg_extension = 80;
+uint8_t current_leg_extension = 100;
 float roll_P = 1.30f, roll_I = 0.0015f, roll_D = 0.5f; // SET THROUGH TESTING
 
 // --- PID Functions ---
@@ -68,237 +44,145 @@ PIDController<float> rollPID(roll_P, roll_I, roll_D, getRoll, applyRollOutput);
 
 
 
-// --- Constants & Variables ---
-float target_pitch = 9.5; // Offset found through testing
-float pitch_P = 4.0, pitch_I = 0.04, pitch_D = 0.10; // Higher P for motors usually
-// float pitch_P = 0.5, pitch_I = 0.01, pitch_D = 0.01; // Higher P for motors usually
+//------------------- MAIN PITCH PID -------------------
+float target_pitch = 10.5; // close found through testing
+// float pitch_P = 4.0, pitch_I = 0.02, pitch_D = 0.08;
+float pitch_P = 6.0, pitch_I = 0.06, pitch_D = 0.03;
 
-// --- PID Functions ---
-// float getPitch() {
-//     Serial.print("Pitch: ");
-//     Serial.print(imu::angle_pitch);
-//     return imu::angle_pitch; // Assuming pitch exists similarly to roll
-// }
+float getPitch() {
+  Serial.print("\tPitch: ");
+  Serial.print(imu::angle_pitch);
 
-// void applyPitchOutput(float output) {
-//     // Output range -135 to 135
-//     int motor_speed = static_cast<int>(output);
+  return imu::angle_pitch;
+}
 
+float live_motor_output = 0;  // for wifi debug thing
+void applyPitchOutput(float output) {
+  // // Combine Pitch balance with Yaw correction
+  // int left_motor = static_cast<int>(output + yaw_adjustment);
+  // int right_motor = static_cast<int>(output - yaw_adjustment);
 
-//     int after_dead_space = motor_speed + ((motor_speed > 0) ? 120 : -120);
+  // // Apply motor limits and deadzone logic as you did before
+  // motors::setMotorPwmRaw(1, left_motor);
+  // motors::setMotorPwmRaw(2, right_motor);
 
-//     // motors::setMotorPwmRaw(1, after_dead_space);
-//     Serial.print("\tOUTPUT:");
-//     Serial.println(motor_speed);
-    
-//     // Drive both wheels together to balance
-//     motors::setMotorPwmRaw(1, after_dead_space); // Left Motor
-//     motors::setMotorPwmRaw(2, after_dead_space); // Right Motor
-// }
-
-// // Initialize Pitch PID
-// PIDController<float> pitchPID(pitch_P, pitch_I, pitch_D, getPitch, applyPitchOutput);
+  // Output range -135 to 135
+  int motor_speed = static_cast<int>(output);
 
 
+  int after_dead_space = motor_speed + ((motor_speed > 0) ? 120 : -120);
+
+  // int spd1 = after_dead_space + yaw_adjustment;
+  // int spd2 = after_dead_space - yaw_adjustment;
+  int spd1 = after_dead_space;
+  int spd2 = after_dead_space;
+
+  // motors::setMotorPwmRaw(1, after_dead_space);
+
+  // Serial.print("\tSpeed: ");
+  // Serial.print(spd1);
+  
+  // Drive both wheels together to balance
+  motors::setMotorPwmRaw(1, spd1); // Left Motor
+  motors::setMotorPwmRaw(2, spd2); // Right Motor
+
+  live_motor_output = spd1;
+}
+
+PIDController<float> pitchPID(pitch_P, pitch_I, pitch_D, getPitch, applyPitchOutput);
 
 
 
 
 
 
-
-// --- Global Variables for Loop Communication ---
-float current_target_pitch = 0.0; 
+//------------------- Adjust target pitch PID -------------------
+// measured around 9.5 or 10.0deg pitch
+// reads average velocity to adjust target pitch
+// float current_target_pitch = 10.0; 
+float current_target_pitch = 6.0; 
 float yaw_adjustment = 0.0;
-float target_yaw = 0.0; // Set this in setup() to the current heading
+float target_yaw = 0.0; 
+// float avg_rpm = 0.0;
 
-// --- PID 1: Velocity Loop (The "Manager") ---
 float getAverageRPM() {
-    // Average speed of both wheels
-    return (motors::read_rpm(1) + motors::read_rpm(2)) / 2.0f;
+  // return (motors::read_rpm(1) + motors::read_rpm(2)) / 2.0f;
+  // float average = (motors::read_rpm(1) + motors::read_rpm(2)) / 2.0f;
+  // avg_rpm = 0.5 *avg_rpm + 0.5 * ((motors::read_rpm(1) + motors::read_rpm(2)) / 2.0f);
+  // avg_rpm = 0.5 *avg_rpm + 0.5 * ((motors::read_encoder(1) + motors::read_encoder(2)) / 2.0f);
+  float avg_rpm = (motors::read_encoder(1) + motors::read_encoder(2)) / 2.0f;
+  Serial.print("\tAverage ticks: ");
+  Serial.print(avg_rpm);
+
+  return avg_rpm;
 }
 
 void applyVelocityOutput(float output) {
-    // This output adjusts the target angle of the Pitch PID.
-    // If the bot drifts forward (positive RPM), we increase the target pitch 
-    // to make it lean back. 
-    current_target_pitch = output; 
+  // output = 9.5f; // lol hardcode it for now bruh
+  Serial.print("\tTarget Pitch: ");
+  Serial.print(output);
 
-    Serial.print("\tTarget Pitch: ");
-    Serial.print(current_target_pitch);
+  current_target_pitch = output; 
+
 }
 
-// --- PID 2: Yaw Loop (Steering) ---
+// float vel_p = 0.55, vel_i = 0.0000, vel_d = 0.001;
+// float vel_p = 0.002, vel_i = 0.001, vel_d = 0.000;
+float vel_p = 0.001, vel_i = 0.001, vel_d = 0.2;
+PIDController<float> velocityPID(vel_p, vel_i, vel_d, getAverageRPM, applyVelocityOutput);
+
+
+//------------------- Yaw PID -------------------
+// applies differential to motors to cancel yaw drift?
 float getYaw() {
-    return imu::angle_yaw; 
+  return imu::angle_yaw; 
 }
 
 void applyYawOutput(float output) {
-    // This value will be added to one motor and subtracted from the other
-    yaw_adjustment = output;
+  yaw_adjustment = output;
 }
 
-// --- Updated PID 3: Pitch Loop (The "Worker") ---
-float getPitch() {
-    Serial.print("\tPitch: ");
-    Serial.print(imu::angle_pitch);
-
-    return imu::angle_pitch;
-}
-
-void applyFinalMotorOutput(float output) {
-    // // Combine Pitch balance with Yaw correction
-    // int left_motor = static_cast<int>(output + yaw_adjustment);
-    // int right_motor = static_cast<int>(output - yaw_adjustment);
-
-    // // Apply motor limits and deadzone logic as you did before
-    // motors::setMotorPwmRaw(1, left_motor);
-    // motors::setMotorPwmRaw(2, right_motor);
-
-    // Output range -135 to 135
-    int motor_speed = static_cast<int>(output);
+float yaw_p = 1.5, yaw_i = 0.05, yaw_d = 0.2;
+PIDController<float> yawPID(yaw_p, yaw_i, yaw_d, getYaw, applyYawOutput);
 
 
-    int after_dead_space = motor_speed + ((motor_speed > 0) ? 120 : -120);
+// RemoteTuner tuner(pitchPID, velocityPID);
+RemoteTuner tuner(
+  pitchPID, 
+  velocityPID, 
+  &imu::angle_pitch, 
+  &current_target_pitch, 
+  &live_motor_output
+);
 
-    // int spd1 = after_dead_space + yaw_adjustment;
-    // int spd2 = after_dead_space - yaw_adjustment;
-    int spd1 = after_dead_space;
-    int spd2 = after_dead_space;
-
-    // motors::setMotorPwmRaw(1, after_dead_space);
-    Serial.print("\tSpeed: ");
-    Serial.print(spd1);
-    
-    // Drive both wheels together to balance
-    motors::setMotorPwmRaw(1, spd1); // Left Motor
-    motors::setMotorPwmRaw(2, spd2); // Right Motor
-}
-
-// --- Loop Initializations ---
-// Velocity: P should be small, I is very important here to stop drift
-PIDController<float> velocityPID(0.05, 0.001, 0.000, getAverageRPM, applyVelocityOutput);
-
-// Yaw: Keeps the bot facing one way
-PIDController<float> yawPID(1.5, 0.05, 0.2, getYaw, applyYawOutput);
-
-// Pitch: (Your existing tuned constants)
-PIDController<float> pitchPID(pitch_P, pitch_I, pitch_D, getPitch, applyFinalMotorOutput);
-
-
-
-
-
-
-
-
+// potential testing vals:
+//pitch pid:  6.0, 0.06, 0.03
+//vel pid:    0.001, 0.001, 0.2
 
 void setup() {
   Serial.begin(115200);
   
   
-  
-  // motors_test::begin();
-  // movement::init();
-  //================= TESTING =================
-  // testing::runAllTests();
-
-  // testing::runMotorSweep(1, 1000, 5, 50);
-  // testing::runMotorSweep(1, 1000, 5, 50);
-
-  // for (int i = 0; i < 200; i += 20) {
-  //   motors_test::startClosedLoop(0, i, 5000);
-  // }
-
-  // testing::servoLegTest();
-  // testing::servoLegTest();
-  // testing::servoLegTest();
-  // testing::servoLegTest();
-
-  // testing::imuTest();
-  // testing::oledBuzzerTest();
-  
-  // motors_test::startClosedLoop(1, 50, 5000);
-  // motors_test::startClosedLoop(1, 100, 5000);
-  // motors_test::startClosedLoop(1, 300, 5000);
-
-  // motors_test::startClosedLoop(1, 50, 5000);
-  // motors_test::startClosedLoop(1, 100, 5000);
-  // motors_test::startClosedLoop(1, 300, 5000);
-
-  // motors_test::startClosedLoop(1, 50, 5000);
-  // motors_test::startClosedLoop(1, 100, 5000);
-  // motors_test::startClosedLoop(1, 300, 5000);
-
-
-  // testing::balance(1);
-
-  
-  // testing PID class from online
-
-  // motors::init();
+  // inits IMU, motors, servos
   movement::init();
 
-  /*
-  myPIDController.registerTimeFunction(millis);
-  myPIDController.setOutputBounds(-135, 135); // currently driving raw PWM, but can increase resolution. +-2047?
-
-  
-  unsigned long start = millis();
-  myPIDController.setTarget(-50);
-  Serial.println("Driving to 50 RPM");
-  while (start + 5000 > millis()) {
-    myPIDController.tick();
-    delay(50);
-  }
-
-  start = millis();
-  myPIDController.setTarget(-100);
-  Serial.println("Driving to 100 RPM");
-  while (start + 5000 > millis()) {
-    myPIDController.tick();
-    delay(50);
-  }
-
-  start = millis();
-  myPIDController.setTarget(-200);
-  Serial.println("Driving to 200 RPM");
-  while (start + 5000 > millis()) {
-    myPIDController.tick();
-    delay(50);
-  }
-
-  // motors::stopMotor(1);
-  
-  // sweep!!!
-  // for (int i = -50; i < 50; i++) {
-  //   myPIDController.setTarget(i);
-
-  // }
-
-
-  motors::stopMotor(1);
-  */
-
   rollPID.registerTimeFunction(millis);
-  rollPID.setOutputBounds(-20.0f, 20.0f); // Keep offset within your < 20 limit
+  rollPID.setOutputBounds(-20.0f, 20.0f);
   rollPID.setTarget(target_roll);
 
   pitchPID.registerTimeFunction(millis);
-  pitchPID.setOutputBounds(-135, 135);
+  pitchPID.setOutputBounds(-135, 135);  // max speed minus dead zone
   pitchPID.setTarget(target_pitch);
 
 
 
-  velocityPID.setTarget(0); 
-  // velocityPID.setOutputBounds(-2.0, 2.0); // Limit lean to +/- 5 degrees
-  velocityPID.setOutputBounds(7.0, 13.0); // 10 deg is close?
   velocityPID.registerTimeFunction(millis);
+  velocityPID.setOutputBounds(-4.0, 16.0); // 10 deg is close?
+  velocityPID.setTarget(0); 
 
-  // Yaw Loop: Stay at current heading
   target_yaw = imu::angle_yaw;
   yawPID.setTarget(target_yaw);
-  yawPID.setOutputBounds(-1, 1); // Max power to use for turning
+  yawPID.setOutputBounds(-1, 1);  // change
   yawPID.registerTimeFunction(millis);
 
   // Pitch Loop
@@ -306,67 +190,44 @@ void setup() {
   pitchPID.registerTimeFunction(millis);
 
 
+  /*
   unsigned long lastUpdateTime = 0;
   const int updateInterval = 10; // 10ms = 100Hz
 
 
   while (true) {
     if (millis() - lastUpdateTime >= updateInterval) {
-        lastUpdateTime = millis();
+      lastUpdateTime = millis();
 
-        imu::tick();
-
-        /*
-        // 1. Update Roll (Legs)
-        rollPID.tick();
-
-        // 2. Update Pitch (Wheels)
-        pitchPID.tick();
-        */
-       // 1. Calculate how much we need to lean to stop drifting
-        velocityPID.tick();
-
-        // 2. Calculate how much we need to turn to stay straight
-        // yawPID.tick();
-
-        // 3. Update the Pitch target based on the Velocity PID output
-        pitchPID.setTarget(current_target_pitch);
-
-        // 4. Run the balance and yaw correction
-        pitchPID.tick();
-        
-        // 5. Run the Roll/Leg balance from Step 1
-        rollPID.tick();
-
-
-        // if (millis() > 1000 * 20) break;
-        Serial.println("");
-
-
-        if (imu::angle_pitch < -25.0 || imu::angle_pitch > 35.0) {
-          motors::stopMotor(1);
-          motors::stopMotor(2);
-          break;
+      imu::tick();
+      
+      // check limit for falling
+      if (imu::angle_pitch < -25.0 || imu::angle_pitch > 35.0) {
+        motors::setMotorPwmRaw(1, 0);
+        motors::setMotorPwmRaw(2, 0);
+        while (imu::angle_pitch < -25.0 || imu::angle_pitch > 35.0) {
+          imu::tick();
         }
+        delay(1000);
+      }
+
+      velocityPID.tick();
+      // yawPID.tick();
+      pitchPID.setTarget(current_target_pitch);
+      pitchPID.tick();
+      rollPID.tick();
+
+      Serial.println(""); // newline for any functions printing
+
     }
 
   }
-
-
-  //================= TESTING CLASSES =================
-  // motors_test::runSweep(1, 1000, 1, 50);
-  // motors_test::runSweep(2, 1000, 1, 50);
-
-  // motors_test::begin();
-  // motors_test::setMotorRaw(2, 100);
-  //===================================================
+  */
   
-  
-  /*
   xTaskCreatePinnedToCore(
     Core0Loop,
     "Core0",
-    10000,  // stack size?
+    8192,  // stack size?
     NULL, // task parameters
     1,  // task priority
     &Core0Task,
@@ -375,13 +236,13 @@ void setup() {
   xTaskCreatePinnedToCore(
     Core1Loop,
     "Core1",
-    10000,  // stack size?
+    8192,  // stack size?
     NULL, // task parameters
     1,  // task priority
     &Core1Task,
     1 // set to core 0
   );
-  */
+  
 }
 
 void loop() 
@@ -389,12 +250,12 @@ void loop()
    // blank loop cause tasks do the loops
 }
 
-/*
+
 
 // CORE 0 - Movement
 void Core0Loop(void *pvParameters) {
   // setup...
-  movement::init();
+  // movement::init();
 
 
   for(;;) {
@@ -411,22 +272,53 @@ void Core0Loop(void *pvParameters) {
     // handle communication between cores...
     // receive controls
     // receive any cosmetics
+
+
+    
+
+    imu::tick();
+    
+    // check limit for falling
+    if (imu::angle_pitch < -25.0 || imu::angle_pitch > 35.0) {
+      motors::setMotorPwmRaw(1, 0);
+      motors::setMotorPwmRaw(2, 0);
+      while (imu::angle_pitch < -25.0 || imu::angle_pitch > 35.0) {
+        imu::tick();
+      }
+      delay(1000);
+    }
+
+    velocityPID.tick();
+    // yawPID.tick();
+    pitchPID.setTarget(current_target_pitch);
+    pitchPID.tick();
+    rollPID.tick();
+
+    Serial.println(""); // newline for any functions printing
+
+    vTaskDelay(pdMS_TO_TICKS(10)); // 100Hz frequency
   }
 }
 
 // CORE 1 - Cosmetics
 void Core1Loop(void *pvParameters) {
   // setup...
-  controls::init();
-  cosmetics::init();
+  // controls::init();
+  // cosmetics::init();
+  tuner.begin("Backback12-2.4", "password");  // connor here is wifi password pls remember to delete
+  // tuner.begin("Zapper4000", "password");  // connor here is wifi password pls remember to delete
 
   for(;;) {
-    controls::loop(); // does the wifi controls?
-    cosmetics::loop();
+    // controls::loop(); // does the wifi controls?
+    // cosmetics::loop();
+    tuner.handle();
 
     // handle communication between cores...
     // transmit controls
     // receive any cosmetics
+
+    // vTaskDelay(pdMS_TO_TICKS(5)); // 200Hz frequency
+    vTaskDelay(pdMS_TO_TICKS(10)); // 200Hz frequency
   }
 }
-*/
+

@@ -9,13 +9,14 @@ namespace movement {
 
 void init() {
   // Init I2C bus #1
-  TwoWire &wire = Wire;   // start new bus? does this do this??? what if Wire is already inits?
-  wire.begin(PIN_SDA1, PIN_SCL1);
-  wire.setClock(400000);
+  // TwoWire &wire = Wire;   // start new bus? does this do this??? what if Wire is already inits?
+  // YES, use Wire and Wire1
+  Wire.begin(PIN_SDA1, PIN_SCL1);
+  Wire.setClock(400000);
 
-  servos::init(wire);
+  servos::init(Wire);
   motors::init();
-  imu::init(wire);
+  imu::init(Wire);
 }
 
 void loop() {
@@ -38,8 +39,13 @@ void loop() {
 
 namespace servos
 {
+  float left_percent;
+  float right_percent;
+  float left_angle;
+  float right_angle;
 
   Adafruit_PWMServoDriver pwm;
+
 
   void init(TwoWire &wire) {
     // Init servos
@@ -53,10 +59,13 @@ namespace servos
   }
 
 
-  uint16_t percentToPulse(float percent, bool inverted) {
+  uint16_t percentToPulse(float percent, bool inverted, float *debug_angle_pointer=nullptr) {
     percent = constrain(percent, 0.0f, 100.0f);
 
     float angle = map(percent, 0.0f, 100.0f, 10.0f, 60.0f); // safe angles found through testing
+    if (debug_angle_pointer != nullptr) {
+      *debug_angle_pointer = angle;
+    }
     uint16_t pulse = map(angle, 0.0f, 180.0f, 500.0f, 2500.0f);
 
     if (inverted) {
@@ -115,8 +124,11 @@ namespace servos
     float left = percent + offset;
     float right = percent - offset;
 
-    pwm.writeMicroseconds(1, percentToPulse(left, false));
-    pwm.writeMicroseconds(0, percentToPulse(right, true));
+    left_percent = left;
+    right_percent = right;
+
+    pwm.writeMicroseconds(1, percentToPulse(left, false, &left_angle));
+    pwm.writeMicroseconds(0, percentToPulse(right, true, &right_angle));
   }
 
 }
@@ -131,8 +143,8 @@ namespace motors
   void IRAM_ATTR isr_enc1() {
     int a = readPinFast(PIN_ENCODER_1A);
     int b = readPinFast(PIN_ENCODER_1B);
-    if (a == b) enc1_count++;
-    else enc1_count--;
+    if (a == b) enc1_count--;
+    else enc1_count++;      // FLIPPED
   }
 
   void IRAM_ATTR isr_enc2() {
@@ -270,7 +282,7 @@ namespace motors
 
     long encoder_ticks = read_encoder(channel);
 
-    float revolutions = (float)encoder_ticks / (ENCODER_PPR * 8);
+    float revolutions = (float)encoder_ticks / (ENCODER_PPR * 2);
     // float minutes = (float)dt / 60000.0f;
     float minutes = dt_us / 60e6;
     return revolutions / minutes;
