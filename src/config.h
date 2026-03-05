@@ -28,4 +28,9 @@
 #define ADDR_PCA9265 0x40   // Servo driver
 
 
+// motors
+const int PWM_MAX = 255;
+const int PWM_MIN = 120;    // rough minimum PWM to drive
+const int PWM_RANGE = PWM_MAX - PWM_MIN;
+
 #endif
