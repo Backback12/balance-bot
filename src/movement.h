@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
+#include <Adafruit_VL53L0X.h>
 
 
 
@@ -25,12 +26,17 @@ namespace movement {
 
 namespace servos
 {
+    extern float left_percent;
+    extern float right_percent;
+    extern float left_angle;
+    extern float right_angle;
     // TwoWire buss;
     // Adafruit_PWMServoDriver pwm;
     void init(TwoWire &wire);
     void tick();
     void legMove(uint8_t channel, float percent);
     void legsMove(float percent, float offset);
+    void headMove(int pitch, int yaw);
 } // namespace servos
 
 namespace motors
@@ -90,4 +96,89 @@ namespace imu
 } // namespace imu
 
 
+
+
+
+
+namespace ToF
+{
+    static const uint8_t NUM_SENSORS = 3;
+
+    static const int XSHUT_0 = 23;
+    static const int XSHUT_1 = 26;
+
+    static const uint8_t ADDR_2 = 0x30;
+    static const uint8_t ADDR_0 = 0x31;
+    static const uint8_t ADDR_1 = 0x32;
+
+    static Adafruit_VL53L0X sensors[NUM_SENSORS];
+    static TwoWire* i2c = nullptr;
+
+    // inline bool init(TwoWire& wire)
+    // {
+    //     i2c = &wire;
+    //     i2c->begin();
+
+    //     pinMode(XSHUT_0, OUTPUT);
+    //     pinMode(XSHUT_1, OUTPUT);
+
+    //     digitalWrite(XSHUT_0, LOW);
+    //     digitalWrite(XSHUT_1, LOW);
+    //     delay(10);
+
+    //     // --- Sensor 2 (always on, default 0x29)
+    //     if (!sensors[2].begin(0x29, false, i2c))
+    //         return false;
+
+    //     sensors[2].setAddress(ADDR_2);
+    //     delay(10);
+
+    //     // --- Sensor 0
+    //     digitalWrite(XSHUT_0, HIGH);
+    //     delay(10);
+
+    //     if (!sensors[0].begin(0x29, false, i2c))
+    //         return false;
+
+    //     sensors[0].setAddress(ADDR_0);
+    //     delay(10);
+
+    //     // --- Sensor 1
+    //     digitalWrite(XSHUT_1, HIGH);
+    //     delay(10);
+
+    //     if (!sensors[1].begin(0x29, false, i2c))
+    //         return false;
+
+    //     sensors[1].setAddress(ADDR_1);
+    //     delay(10);
+
+    //     return true;
+    // }
+
+    inline bool init(TwoWire& wire)
+{
+    i2c = &wire;
+    i2c->begin();
+
+    // Single sensor at default address 0x29
+    if (!sensors[0].begin(0x29, false, i2c))
+        return false;
+
+    return true;
+}
+
+    inline uint16_t tofRead(uint8_t index)
+    {
+        if (index >= NUM_SENSORS) return 0;
+
+        VL53L0X_RangingMeasurementData_t measure;
+        sensors[index].rangingTest(&measure, false);
+
+        if (measure.RangeStatus != 4)
+            return measure.RangeMilliMeter;
+
+        return 0;
+    }
+}
 #endif

@@ -7,26 +7,39 @@
 
 class RemoteTuner {
 public:
-    // Added pointers to the live data we want to graph
     RemoteTuner(PIDController<float>& pitch, PIDController<float>& velocity, 
-                float* livePitch, float* liveTarget, float* liveOutput);
-    
+                float* livePitch, float* liveTarget, float* liveOutput,
+                float* legExt, float* leftPct, float* rightPct, 
+                float* leftAng, float* rightAng);
+
     void begin(const char* ssid, const char* password);
     void handle();
 
+    float _targetMove;
+    float _targetTurn;
+
 private:
-    WebServer server;
+    WebServer server; // Use WebServer for ESP32
     PIDController<float>& _pitchPID;
     PIDController<float>& _velPID;
     
-    // Pointers to Core 0 variables
+    // Live Telemetry Pointers
     float* _livePitch;
     float* _liveTarget;
     float* _liveOutput;
 
+    // Servo/Leg Pointers
+    float* _legExt;    // Read/Write
+    float* _leftPct;   // Read Only
+    float* _rightPct;  // Read Only
+    float* _leftAng;   // Read Only
+    float* _rightAng;  // Read Only
+
+
     void handleRoot();
     void handleUpdate();
-    void handleData(); // New endpoint for AJAX data
+    void handleData();
+    void handleMove();
     String getHTML();
 };
 

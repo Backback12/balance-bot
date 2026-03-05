@@ -11,6 +11,7 @@ https://github.com/FluxGarage/RoboEyes/blob/main/examples/i2c_SSD1306_AnimationS
 // #include "testing.h"
 #include "movement.h"
 #include "controls.h"
+#include "cosmetics.h"
 #include "PID.h"
 
 TaskHandle_t Core0Task;
@@ -23,7 +24,7 @@ void Core1Loop(void *pvParameters);
 // make servos differential to affect roll
 //
 float target_roll = 0.0;  // change when "skating"?
-uint8_t current_leg_extension = 100;
+float current_leg_extension = 30;
 float roll_P = 1.30f, roll_I = 0.0015f, roll_D = 0.5f; // SET THROUGH TESTING
 
 // --- PID Functions ---
@@ -47,16 +48,18 @@ PIDController<float> rollPID(roll_P, roll_I, roll_D, getRoll, applyRollOutput);
 //------------------- MAIN PITCH PID -------------------
 float target_pitch = 10.5; // close found through testing
 // float pitch_P = 4.0, pitch_I = 0.02, pitch_D = 0.08;
-float pitch_P = 6.0, pitch_I = 0.06, pitch_D = 0.03;
+// float pitch_P = 6.0, pitch_I = 0.06, pitch_D = 0.03;
+float pitch_P = 8.0, pitch_I = 0.085, pitch_D = 0.025;
 
 float getPitch() {
-  Serial.print("\tPitch: ");
-  Serial.print(imu::angle_pitch);
+  // Serial.print("\tPitch: ");
+  // Serial.print(imu::angle_pitch);
 
   return imu::angle_pitch;
 }
 
 float live_motor_output = 0;  // for wifi debug thing
+/*
 void applyPitchOutput(float output) {
   // // Combine Pitch balance with Yaw correction
   // int left_motor = static_cast<int>(output + yaw_adjustment);
@@ -88,6 +91,27 @@ void applyPitchOutput(float output) {
 
   live_motor_output = spd1;
 }
+*/
+void applyPitchOutput(float output) {
+    // 'output' is the balancing effort from Pitch PID
+    int motor_base = static_cast<int>(output);
+    
+    // Apply deadzone only if there is actual intended movement
+    if (abs(motor_base) > 1) {
+        motor_base += (motor_base > 0) ? 120 : -120;
+    }
+
+    // Combine with Yaw Adjustment (from PID + Manual Input)
+    // int left_motor = motor_base + yaw_adjustment;
+    // int right_motor = motor_base - yaw_adjustment;
+    int left_motor = motor_base;
+    int right_motor = motor_base;
+
+    motors::setMotorPwmRaw(1, left_motor);
+    motors::setMotorPwmRaw(2, right_motor);
+
+    live_motor_output = motor_base; 
+}
 
 PIDController<float> pitchPID(pitch_P, pitch_I, pitch_D, getPitch, applyPitchOutput);
 
@@ -111,16 +135,16 @@ float getAverageRPM() {
   // avg_rpm = 0.5 *avg_rpm + 0.5 * ((motors::read_rpm(1) + motors::read_rpm(2)) / 2.0f);
   // avg_rpm = 0.5 *avg_rpm + 0.5 * ((motors::read_encoder(1) + motors::read_encoder(2)) / 2.0f);
   float avg_rpm = (motors::read_encoder(1) + motors::read_encoder(2)) / 2.0f;
-  Serial.print("\tAverage ticks: ");
-  Serial.print(avg_rpm);
+  // Serial.print("\tAverage ticks: ");
+  // Serial.print(avg_rpm);
 
   return avg_rpm;
 }
 
 void applyVelocityOutput(float output) {
   // output = 9.5f; // lol hardcode it for now bruh
-  Serial.print("\tTarget Pitch: ");
-  Serial.print(output);
+  // Serial.print("\tTarget Pitch: ");
+  // Serial.print(output);
 
   current_target_pitch = output; 
 
@@ -152,8 +176,19 @@ RemoteTuner tuner(
   velocityPID, 
   &imu::angle_pitch, 
   &current_target_pitch, 
-  &live_motor_output
+  &live_motor_output,
+
+  &current_leg_extension,
+  &servos::left_percent,
+  &servos::right_percent,
+  &servos::left_angle,
+  &servos::right_angle
 );
+
+
+
+Cosmetics robotHead(&Wire1);
+
 
 // potential testing vals:
 //pitch pid:  6.0, 0.06, 0.03
@@ -256,7 +291,12 @@ void loop()
 void Core0Loop(void *pvParameters) {
   // setup...
   // movement::init();
+  servos::headMove(90, 90);
 
+  unsigned long temp_start = millis();
+  while (millis() < temp_start + 500) {
+    // temp wait for oled to run?
+  }
 
   for(;;) {
     // movement::loop();
@@ -275,7 +315,7 @@ void Core0Loop(void *pvParameters) {
 
 
     
-
+    /*
     imu::tick();
     
     // check limit for falling
@@ -297,6 +337,38 @@ void Core0Loop(void *pvParameters) {
     Serial.println(""); // newline for any functions printing
 
     vTaskDelay(pdMS_TO_TICKS(10)); // 100Hz frequency
+    */
+
+    imu::tick();
+
+    // 1. GET INPUTS FROM TUNER
+    // Convert normalized -1.0...1.0 to actual target units
+    // For velocity, this might be target encoder ticks per 10ms
+    // float moveInput = tuner.getTargetMove(); // -1.0 to 1.0
+    // float turnInput = tuner.getTargetTurn(); // -1.0 to 1.0
+    float moveInput = tuner._targetMove; // -1.0 to 1.0
+    float turnInput = tuner._targetTurn; // -1.0 to 1.0
+    
+
+    // 2. FORWARD MOVEMENT
+    // Instead of targeting 0 speed, we target the moveInput
+    // We scale moveInput by a 'max speed' factor (e.g., 20 ticks)
+    velocityPID.setTarget(moveInput * 20.0f); 
+    velocityPID.tick();
+
+    // 3. PITCH BALANCE
+    pitchPID.setTarget(current_target_pitch); // This is the output from velocityPID
+    pitchPID.tick();
+
+    // 4. TURNING (Yaw)
+    // We can simply add the turnInput to the yaw adjustment
+    float finalYawAdj = yaw_adjustment + (turnInput * 40.0f); // Scale 40 for turn strength
+
+    // 5. FINAL MOTOR OUTPUT (Update applyPitchOutput to use finalYawAdj)
+    // (See updated applyPitchOutput below)
+
+    rollPID.tick();
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
@@ -305,17 +377,39 @@ void Core1Loop(void *pvParameters) {
   // setup...
   // controls::init();
   // cosmetics::init();
+  // return;
+  // for(;;) {}
+
+  robotHead.begin(PIN_BUZZER, PIN_SDA2, PIN_SCL2);
+
+
+  // temp run oled for 5 seconds
+  unsigned long temp_start = millis();
+  while (millis() < temp_start + 500) {
+    robotHead.tick();
+  }
+  robotHead.tick();
+
+  // ToF::init(Wire1);  // make robot head expose the wire as well bru
+
+
   tuner.begin("Backback12-2.4", "password");  // connor here is wifi password pls remember to delete
   // tuner.begin("Zapper4000", "password");  // connor here is wifi password pls remember to delete
 
   for(;;) {
     // controls::loop(); // does the wifi controls?
     // cosmetics::loop();
+    robotHead.tick();
+
     tuner.handle();
 
     // handle communication between cores...
     // transmit controls
     // receive any cosmetics
+
+    // uint16_t d = ToF::tofRead(0);
+    // Serial.print("Distance: ");
+    // Serial.println(d);
 
     // vTaskDelay(pdMS_TO_TICKS(5)); // 200Hz frequency
     vTaskDelay(pdMS_TO_TICKS(10)); // 200Hz frequency

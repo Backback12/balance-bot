@@ -131,6 +131,17 @@ namespace servos
     pwm.writeMicroseconds(0, percentToPulse(right, true, &right_angle));
   }
 
+  void headMove(int pitch, int yaw) {
+    pitch = constrain(pitch, 0, 180); // for now 90 is center
+    yaw = constrain(yaw, 0, 180);
+
+    float pitch_pulse = map(pitch, 0.0f, 180.0f, 500.0f, 2500.0f);
+    float yaw_pulse = map(pitch, 0.0f, 180.0f, 500.0f, 2500.0f);
+
+    pwm.writeMicroseconds(2, pitch_pulse);
+    pwm.writeMicroseconds(3, yaw_pulse);
+  }
+
 }
 
 

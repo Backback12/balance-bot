@@ -28,8 +28,8 @@
 
 
 // Display colors
-uint8_t BGCOLOR = 0; // background and overlays
-uint8_t MAINCOLOR = 1; // drawings
+constexpr uint8_t BGCOLOR = 0; // background and overlays
+constexpr uint8_t MAINCOLOR = 1; // drawings
 
 // For mood type switch
 #define DEFAULT 0
